@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+import codecs
 import logging
 import sys
 from io import BytesIO
@@ -127,7 +128,7 @@ class LimitedStream(object):
 class WSGIRequest(http.HttpRequest):
     def __init__(self, environ):
         script_name = base.get_script_name(environ)
-        path_info = force_text(environ.get('PATH_INFO', '/'))
+        path_info = base.get_path_info(environ)
         if not path_info or path_info == script_name:
             # Sometimes PATH_INFO exists, but is empty (e.g. accessing
             # the SCRIPT_NAME URL without a trailing slash). We really need to
@@ -144,6 +145,14 @@ class WSGIRequest(http.HttpRequest):
         self.META['PATH_INFO'] = path_info
         self.META['SCRIPT_NAME'] = script_name
         self.method = environ['REQUEST_METHOD'].upper()
+        _, content_params = self._parse_content_type(self.META.get('CONTENT_TYPE', ''))
+        if 'charset' in content_params:
+            try:
+                codecs.lookup(content_params['charset'])
+            except LookupError:
+                pass
+            else:
+                self.encoding = content_params['charset']
         self._post_parse_error = False
         try:
             content_length = int(self.environ.get('CONTENT_LENGTH'))
@@ -152,13 +161,23 @@ class WSGIRequest(http.HttpRequest):
         self._stream = LimitedStream(self.environ['wsgi.input'], content_length)
         self._read_started = False
 
-    def get_full_path(self):
-        # RFC 3986 requires query string arguments to be in the ASCII range.
-        # Rather than crash if this doesn't happen, we encode defensively.
-        return '%s%s' % (self.path, self.environ.get('QUERY_STRING', '') and ('?' + iri_to_uri(self.environ.get('QUERY_STRING', ''))) or '')
-
     def _is_secure(self):
         return 'wsgi.url_scheme' in self.environ and self.environ['wsgi.url_scheme'] == 'https'
+
+    def _parse_content_type(self, ctype):
+        """
+        Media Types parsing according to RFC 2616, section 3.7.
+
+        Returns the data type and parameters. For example:
+        Input: "text/plain; charset=iso-8859-1"
+        Output: ('text/plain', {'charset': 'iso-8859-1'})
+        """
+        content_type, _, params = ctype.partition(';')
+        content_params = {}
+        for parameter in params.split(';'):
+            k, _, v = parameter.strip().partition('=')
+            content_params[k] = v
+        return content_type, content_params
 
     def _get_request(self):
         if not hasattr(self, '_request'):
@@ -234,8 +253,8 @@ class WSGIHandler(base.BaseHandler):
             response = http.HttpResponseBadRequest()
         else:
             response = self.get_response(request)
-        finally:
-            signals.request_finished.send(sender=self.__class__)
+
+        response._handler_class = self.__class__
 
         try:
             status_text = STATUS_CODE_TEXT[response.status_code]

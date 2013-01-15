@@ -18,12 +18,16 @@ QUERY_TERMS = set([
 # Larger values are slightly faster at the expense of more storage space.
 GET_ITERATOR_CHUNK_SIZE = 100
 
-# Constants to make looking up tuple values clearer.
+# Namedtuples for sql.* internal use.
+
 # Join lists (indexes into the tuples that are values in the alias_map
 # dictionary in the Query class).
 JoinInfo = namedtuple('JoinInfo',
                       'table_name rhs_alias join_type lhs_alias '
-                      'lhs_join_col rhs_join_col nullable')
+                      'lhs_join_col rhs_join_col nullable join_field')
+
+# Pairs of column clauses to select, and (possibly None) field for the clause.
+SelectInfo = namedtuple('SelectInfo', 'col field')
 
 # How many results to expect from a cursor.execute call
 MULTI = 'multi'

@@ -2,8 +2,9 @@ from __future__ import absolute_import, unicode_literals
 
 from datetime import datetime
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db.models.fields import Field, FieldDoesNotExist
+from django.db.models.query import QuerySet, EmptyQuerySet, ValuesListQuerySet
 from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
 from django.utils import six
 from django.utils.translation import ugettext_lazy
@@ -127,6 +128,40 @@ class ModelTest(TestCase):
         a = Article.objects.get(pk=a.id)
         b = Article.objects.get(pk=a.id)
         self.assertEqual(a, b)
+
+        # Create a very similar object
+        a = Article(
+            id=None,
+            headline='Area man programs in Python',
+            pub_date=datetime(2005, 7, 28),
+        )
+        a.save()
+
+        self.assertEqual(Article.objects.count(), 2)
+
+        # Django raises an Article.MultipleObjectsReturned exception if the
+        # lookup matches more than one object
+        six.assertRaisesRegex(self,
+            MultipleObjectsReturned,
+            "get\(\) returned more than one Article -- it returned 2!",
+            Article.objects.get,
+            headline__startswith='Area',
+        )
+
+        six.assertRaisesRegex(self,
+            MultipleObjectsReturned,
+            "get\(\) returned more than one Article -- it returned 2!",
+            Article.objects.get,
+            pub_date__year=2005,
+        )
+
+        six.assertRaisesRegex(self,
+            MultipleObjectsReturned,
+            "get\(\) returned more than one Article -- it returned 2!",
+            Article.objects.get,
+            pub_date__year=2005,
+            pub_date__month=7,
+        )
 
     def test_object_creation(self):
         # Create an Article.
@@ -259,9 +294,8 @@ class ModelTest(TestCase):
              "datetime.datetime(2005, 7, 28, 0, 0)"])
 
         # dates() requires valid arguments.
-        six.assertRaisesRegex(self,
+        self.assertRaises(
             TypeError,
-            "dates\(\) takes at least 3 arguments \(1 given\)",
             Article.objects.dates,
         )
 
@@ -606,3 +640,49 @@ class ModelTest(TestCase):
         Article.objects.bulk_create([Article(headline=lazy, pub_date=datetime.now())])
         article = Article.objects.get()
         self.assertEqual(article.headline, notlazy)
+
+    def test_emptyqs(self):
+        # Can't be instantiated
+        with self.assertRaises(TypeError):
+            EmptyQuerySet()
+        self.assertTrue(isinstance(Article.objects.none(), EmptyQuerySet))
+
+    def test_emptyqs_values(self):
+        # test for #15959
+        Article.objects.create(headline='foo', pub_date=datetime.now())
+        with self.assertNumQueries(0):
+            qs = Article.objects.none().values_list('pk')
+            self.assertTrue(isinstance(qs, EmptyQuerySet))
+            self.assertTrue(isinstance(qs, ValuesListQuerySet))
+            self.assertEqual(len(qs), 0)
+
+    def test_emptyqs_customqs(self):
+        # A hacky test for custom QuerySet subclass - refs #17271
+        Article.objects.create(headline='foo', pub_date=datetime.now())
+        class CustomQuerySet(QuerySet):
+            def do_something(self):
+                return 'did something'
+
+        qs = Article.objects.all()
+        qs.__class__ = CustomQuerySet
+        qs = qs.none()
+        with self.assertNumQueries(0):
+            self.assertEqual(len(qs), 0)
+            self.assertTrue(isinstance(qs, EmptyQuerySet))
+            self.assertEqual(qs.do_something(), 'did something')
+
+    def test_emptyqs_values_order(self):
+        # Tests for ticket #17712
+        Article.objects.create(headline='foo', pub_date=datetime.now())
+        with self.assertNumQueries(0):
+            self.assertEqual(len(Article.objects.none().values_list('id').order_by('id')), 0)
+        with self.assertNumQueries(0):
+            self.assertEqual(len(Article.objects.none().filter(
+                id__in=Article.objects.values_list('id', flat=True))), 0)
+
+    @skipUnlessDBFeature('can_distinct_on_fields')
+    def test_emptyqs_distinct(self):
+        # Tests for #19426
+        Article.objects.create(headline='foo', pub_date=datetime.now())
+        with self.assertNumQueries(0):
+            self.assertEqual(len(Article.objects.none().distinct('headline', 'pub_date')), 0)

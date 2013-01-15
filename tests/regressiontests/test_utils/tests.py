@@ -54,6 +54,46 @@ class AssertNumQueriesTests(TestCase):
         self.assertNumQueries(2, test_func)
 
 
+class AssertQuerysetEqualTests(TestCase):
+    def setUp(self):
+        self.p1 = Person.objects.create(name='p1')
+        self.p2 = Person.objects.create(name='p2')
+
+    def test_ordered(self):
+        self.assertQuerysetEqual(
+            Person.objects.all().order_by('name'),
+            [repr(self.p1), repr(self.p2)]
+        )
+
+    def test_unordered(self):
+        self.assertQuerysetEqual(
+            Person.objects.all().order_by('name'),
+            [repr(self.p2), repr(self.p1)],
+            ordered=False
+        )
+
+    def test_transform(self):
+        self.assertQuerysetEqual(
+            Person.objects.all().order_by('name'),
+            [self.p1.pk, self.p2.pk],
+            transform=lambda x: x.pk
+        )
+
+    def test_undefined_order(self):
+        # Using an unordered queryset with more than one ordered value
+        # is an error.
+        with self.assertRaises(ValueError):
+            self.assertQuerysetEqual(
+                Person.objects.all(),
+                [repr(self.p1), repr(self.p2)]
+            )
+        # No error for one value.
+        self.assertQuerysetEqual(
+            Person.objects.filter(name='p1'),
+            [repr(self.p1)]
+        )
+
+
 class AssertNumQueriesContextManagerTests(TestCase):
     urls = 'regressiontests.test_utils.urls'
 
@@ -448,6 +488,46 @@ class HTMLEqualTests(TestCase):
         from django.http import HttpResponse
         response = HttpResponse('<p class="help">Some help text for the title (with unicode ŠĐĆŽćžšđ)</p>')
         self.assertContains(response, '<p class="help">Some help text for the title (with unicode ŠĐĆŽćžšđ)</p>', html=True)
+
+
+class XMLEqualTests(TestCase):
+    def test_simple_equal(self):
+        xml1 = "<elem attr1='a' attr2='b' />"
+        xml2 = "<elem attr1='a' attr2='b' />"
+        self.assertXMLEqual(xml1, xml2)
+
+    def test_simple_equal_unordered(self):
+        xml1 = "<elem attr1='a' attr2='b' />"
+        xml2 = "<elem attr2='b' attr1='a' />"
+        self.assertXMLEqual(xml1, xml2)
+
+    def test_simple_equal_raise(self):
+        xml1 = "<elem attr1='a' />"
+        xml2 = "<elem attr2='b' attr1='a' />"
+        with self.assertRaises(AssertionError):
+            self.assertXMLEqual(xml1, xml2)
+
+    def test_simple_not_equal(self):
+        xml1 = "<elem attr1='a' attr2='c' />"
+        xml2 = "<elem attr1='a' attr2='b' />"
+        self.assertXMLNotEqual(xml1, xml2)
+
+    def test_simple_not_equal_raise(self):
+        xml1 = "<elem attr1='a' attr2='b' />"
+        xml2 = "<elem attr2='b' attr1='a' />"
+        with self.assertRaises(AssertionError):
+            self.assertXMLNotEqual(xml1, xml2)
+
+    def test_parsing_errors(self):
+        xml_unvalid = "<elem attr1='a attr2='b' />"
+        xml2 = "<elem attr2='b' attr1='a' />"
+        with self.assertRaises(AssertionError):
+            self.assertXMLNotEqual(xml_unvalid, xml2)
+
+    def test_comment_root(self):
+        xml1 = "<?xml version='1.0'?><!-- comment1 --><elem attr1='a' attr2='b' />"
+        xml2 = "<?xml version='1.0'?><!-- comment2 --><elem attr2='b' attr1='a' />"
+        self.assertXMLEqual(xml1, xml2)
 
 
 class SkippingExtraTests(TestCase):

@@ -1,4 +1,5 @@
-from __future__ import absolute_import
+# coding: utf-8
+from __future__ import absolute_import, unicode_literals
 
 import os
 from copy import copy
@@ -9,14 +10,17 @@ from django.contrib.gis.tests.utils import mysql
 from django.contrib.gis.utils.layermapping import (LayerMapping, LayerMapError,
     InvalidDecimal, MissingForeignKey)
 from django.db import router
+from django.conf import settings
 from django.test import TestCase
+from django.utils import unittest
+from django.utils._os import upath
 
 from .models import (
     City, County, CountyFeat, Interstate, ICity1, ICity2, Invalid, State,
     city_mapping, co_mapping, cofeat_mapping, inter_mapping)
 
 
-shp_path = os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir, 'data'))
+shp_path = os.path.realpath(os.path.join(os.path.dirname(upath(__file__)), os.pardir, 'data'))
 city_shp = os.path.join(shp_path, 'cities', 'cities.shp')
 co_shp = os.path.join(shp_path, 'counties', 'counties.shp')
 inter_shp = os.path.join(shp_path, 'interstates', 'interstates.shp')
@@ -284,6 +288,13 @@ class LayerMapTest(TestCase):
         self.assertEqual(City.objects.count(), 3)
         self.assertEqual(City.objects.all().order_by('name_txt')[0].name_txt, "Houston")
 
+    def test_encoded_name(self):
+        """ Test a layer containing utf-8-encoded name """
+        city_shp = os.path.join(shp_path, 'ch-city', 'ch-city.shp')
+        lm = LayerMapping(City, city_shp, city_mapping)
+        lm.save(silent=True, strict=True)
+        self.assertEqual(City.objects.count(), 1)
+        self.assertEqual(City.objects.all()[0].name, "Zürich")
 
 class OtherRouter(object):
     def db_for_read(self, model, **hints):
@@ -308,6 +319,7 @@ class LayerMapRouterTest(TestCase):
     def tearDown(self):
         router.routers = self.old_routers
 
+    @unittest.skipUnless(len(settings.DATABASES) > 1, 'multiple databases required')
     def test_layermapping_default_db(self):
         lm = LayerMapping(City, city_shp, city_mapping)
         self.assertEqual(lm.using, 'other')

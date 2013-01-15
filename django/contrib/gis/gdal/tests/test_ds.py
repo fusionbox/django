@@ -125,7 +125,9 @@ class DataSourceTest(unittest.TestCase):
             self.assertEqual(control_vals, test_vals)
 
     def test03c_layer_references(self):
-        "Test to make sure Layer access is still available without the DataSource."
+        """
+        Ensure OGR objects keep references to the objects they belong to.
+        """
         source = ds_list[0]
 
         # See ticket #9448.
@@ -140,6 +142,9 @@ class DataSourceTest(unittest.TestCase):
         lyr = get_layer()
         self.assertEqual(source.nfeat, len(lyr))
         self.assertEqual(source.gtype, lyr.geom_type.num)
+
+        # Same issue for Feature/Field objects, see #18640
+        self.assertEqual(str(lyr[0]['str']), "1")
 
     def test04_features(self):
         "Testing Data Source Features."
@@ -162,7 +167,8 @@ class DataSourceTest(unittest.TestCase):
                         self.assertEqual(True, isinstance(feat[k], v))
 
                     # Testing Feature.__iter__
-                    for fld in feat: self.assertEqual(True, fld.name in source.fields.keys())
+                    for fld in feat:
+                        self.assertEqual(True, fld.name in source.fields.keys())
 
     def test05_geometries(self):
         "Testing Geometries from Data Source Features."

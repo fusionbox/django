@@ -69,7 +69,9 @@ class BaseFormSet(object):
     def __bool__(self):
         """All formsets have a management form which is not included in the length"""
         return True
-    __nonzero__ = __bool__ # Python 2
+
+    def __nonzero__(self):      # Python 2 compatibility
+        return type(self).__bool__(self)
 
     @property
     def management_form(self):
@@ -123,7 +125,11 @@ class BaseFormSet(object):
         """
         Instantiates and returns the i-th form instance in a formset.
         """
-        defaults = {'auto_id': self.auto_id, 'prefix': self.add_prefix(i)}
+        defaults = {
+            'auto_id': self.auto_id,
+            'prefix': self.add_prefix(i),
+            'error_class': self.error_class,
+            }
         if self.is_bound:
             defaults['data'] = self.data
             defaults['files'] = self.files
@@ -151,14 +157,12 @@ class BaseFormSet(object):
         return self.forms[self.initial_form_count():]
 
     @property
-    def empty_form(self, **kwargs):
-        defaults = {
-            'auto_id': self.auto_id,
-            'prefix': self.add_prefix('__prefix__'),
-            'empty_permitted': True,
-        }
-        defaults.update(kwargs)
-        form = self.form(**defaults)
+    def empty_form(self):
+        form = self.form(
+            auto_id=self.auto_id,
+            prefix=self.add_prefix('__prefix__'),
+            empty_permitted=True,
+        )
         self.add_fields(form, None)
         return form
 
@@ -261,7 +265,7 @@ class BaseFormSet(object):
 
     def is_valid(self):
         """
-        Returns True if form.errors is empty for every form in self.forms.
+        Returns True if every form in self.forms is valid.
         """
         if not self.is_bound:
             return False
@@ -276,8 +280,7 @@ class BaseFormSet(object):
                     # This form is going to be deleted so any of its errors
                     # should not cause the entire formset to be invalid.
                     continue
-            if bool(self.errors[i]):
-                forms_valid = False
+            forms_valid &= form.is_valid()
         return forms_valid and not bool(self.non_form_errors())
 
     def full_clean(self):
@@ -330,7 +333,10 @@ class BaseFormSet(object):
         Returns True if the formset needs to be multipart, i.e. it
         has FileInput. Otherwise, False.
         """
-        return self.forms and self.forms[0].is_multipart()
+        if self.forms:
+            return self.forms[0].is_multipart()
+        else:
+            return self.empty_form.is_multipart()
 
     @property
     def media(self):
@@ -339,7 +345,7 @@ class BaseFormSet(object):
         if self.forms:
             return self.forms[0].media
         else:
-            return Media()
+            return self.empty_form.media
 
     def as_table(self):
         "Returns this formset rendered as HTML <tr>s -- excluding the <table></table>."

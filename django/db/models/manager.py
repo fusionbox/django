@@ -1,6 +1,6 @@
 import copy
 from django.db import router
-from django.db.models.query import QuerySet, EmptyQuerySet, insert_query, RawQuerySet
+from django.db.models.query import QuerySet, insert_query, RawQuerySet
 from django.db.models import signals
 from django.db.models.fields import FieldDoesNotExist
 
@@ -13,7 +13,11 @@ def ensure_default_manager(sender, **kwargs):
     _default_manager if it's not a subclass of Manager).
     """
     cls = sender
-    if cls._meta.abstract or cls._meta.swapped:
+    if cls._meta.abstract:
+        setattr(cls, 'objects', AbstractManagerDescriptor(cls))
+        return
+    elif cls._meta.swapped:
+        setattr(cls, 'objects', SwappedManagerDescriptor(cls))
         return
     if not getattr(cls, '_default_manager', None):
         # Create the default manager, if needed.
@@ -58,7 +62,12 @@ class Manager(object):
         # TODO: Use weakref because of possible memory leak / circular reference.
         self.model = model
         # Only contribute the manager if the model is concrete
-        if not model._meta.abstract and not model._meta.swapped:
+        if model._meta.abstract:
+            setattr(model, name, AbstractManagerDescriptor(model))
+        elif model._meta.swapped:
+            setattr(model, name, SwappedManagerDescriptor(model))
+        else:
+        # if not model._meta.abstract and not model._meta.swapped:
             setattr(model, name, ManagerDescriptor(self))
         if not getattr(model, '_default_manager', None) or self.creation_counter < model._default_manager.creation_counter:
             model._default_manager = self
@@ -104,7 +113,7 @@ class Manager(object):
     #######################
 
     def get_empty_query_set(self):
-        return EmptyQuerySet(self.model, using=self._db)
+        return QuerySet(self.model, using=self._db).none()
 
     def get_query_set(self):
         """Returns a new QuerySet object.  Subclasses can override this method
@@ -224,6 +233,34 @@ class ManagerDescriptor(object):
         return self.manager
 
 
+class AbstractManagerDescriptor(object):
+    # This class provides a better error message when you try to access a
+    # manager on an abstract model.
+    def __init__(self, model):
+        self.model = model
+
+    def __get__(self, instance, type=None):
+        raise AttributeError("Manager isn't available; %s is abstract" % (
+            self.model._meta.object_name,
+        ))
+
+
+class SwappedManagerDescriptor(object):
+    # This class provides a better error message when you try to access a
+    # manager on a swapped model.
+    def __init__(self, model):
+        self.model = model
+
+    def __get__(self, instance, type=None):
+        raise AttributeError("Manager isn't available; %s has been swapped for '%s'" % (
+            self.model._meta.object_name, self.model._meta.swapped
+        ))
+
+
 class EmptyManager(Manager):
+    def __init__(self, model):
+        super(EmptyManager, self).__init__()
+        self.model = model
+
     def get_query_set(self):
         return self.get_empty_query_set()

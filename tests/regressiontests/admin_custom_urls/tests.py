@@ -1,4 +1,5 @@
 from __future__ import absolute_import, unicode_literals
+import warnings
 
 from django.contrib.admin.util import quote
 from django.core.urlresolvers import reverse
@@ -6,7 +7,7 @@ from django.template.response import TemplateResponse
 from django.test import TestCase
 from django.test.utils import override_settings
 
-from .models import Action
+from .models import Action, Person, Car
 
 
 @override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
@@ -81,3 +82,60 @@ class AdminCustomUrlsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Change action')
         self.assertContains(response, 'value="path/to/html/document.html"')
+
+
+@override_settings(PASSWORD_HASHERS=('django.contrib.auth.hashers.SHA1PasswordHasher',))
+class CustomRedirects(TestCase):
+    fixtures = ['users.json', 'actions.json']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_post_save_add_redirect(self):
+        """
+        Ensures that ModelAdmin.response_post_save_add() controls the
+        redirection after the 'Save' button has been pressed when adding a
+        new object.
+        Refs 8001, 18310, 19505.
+        """
+        post_data = { 'name': 'John Doe', }
+        self.assertEqual(Person.objects.count(), 0)
+        response = self.client.post(
+            reverse('admin:admin_custom_urls_person_add'), post_data)
+        persons = Person.objects.all()
+        self.assertEqual(len(persons), 1)
+        self.assertRedirects(
+            response, reverse('admin:admin_custom_urls_person_history', args=[persons[0].pk]))
+
+    def test_post_save_change_redirect(self):
+        """
+        Ensures that ModelAdmin.response_post_save_change() controls the
+        redirection after the 'Save' button has been pressed when editing an
+        existing object.
+        Refs 8001, 18310, 19505.
+        """
+        Person.objects.create(name='John Doe')
+        self.assertEqual(Person.objects.count(), 1)
+        person = Person.objects.all()[0]
+        post_data = { 'name': 'Jack Doe', }
+        response = self.client.post(
+            reverse('admin:admin_custom_urls_person_change', args=[person.pk]), post_data)
+        self.assertRedirects(
+            response, reverse('admin:admin_custom_urls_person_delete', args=[person.pk]))
+
+    def test_post_url_continue(self):
+        """
+        Ensures that the ModelAdmin.response_add()'s parameter `post_url_continue`
+        controls the redirection after an object has been created.
+        """
+        post_data = { 'name': 'SuperFast', '_continue': '1' }
+        self.assertEqual(Car.objects.count(), 0)
+        response = self.client.post(
+            reverse('admin:admin_custom_urls_car_add'), post_data)
+        cars = Car.objects.all()
+        self.assertEqual(len(cars), 1)
+        self.assertRedirects(
+            response, reverse('admin:admin_custom_urls_car_history', args=[cars[0].pk]))

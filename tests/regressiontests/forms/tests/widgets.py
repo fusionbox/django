@@ -4,8 +4,9 @@ from __future__ import unicode_literals
 import copy
 import datetime
 
-from django.conf import settings
+from django.contrib.admin.tests import AdminSeleniumWebDriverTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.urlresolvers import reverse
 from django.forms import *
 from django.forms.widgets import RadioFieldRenderer
 from django.utils import formats
@@ -13,7 +14,10 @@ from django.utils.safestring import mark_safe
 from django.utils import six
 from django.utils.translation import activate, deactivate
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.utils.encoding import python_2_unicode_compatible
+
+from ..models import Article
 
 
 class FormsWidgetTestCase(TestCase):
@@ -225,6 +229,10 @@ class FormsWidgetTestCase(TestCase):
         # checkboxes).
         self.assertFalse(w.value_from_datadict({}, {}, 'testing'))
 
+        value = w.value_from_datadict({'testing': '0'}, {}, 'testing')
+        self.assertIsInstance(value, bool)
+        self.assertTrue(value)
+
         self.assertFalse(w._has_changed(None, None))
         self.assertFalse(w._has_changed(None, ''))
         self.assertFalse(w._has_changed('', None))
@@ -232,6 +240,8 @@ class FormsWidgetTestCase(TestCase):
         self.assertTrue(w._has_changed(False, 'on'))
         self.assertFalse(w._has_changed(True, 'on'))
         self.assertTrue(w._has_changed(True, ''))
+        # Initial value may have mutated to a string due to show_hidden_initial (#19537)
+        self.assertTrue(w._has_changed('False', 'on'))
 
     def test_select(self):
         w = Select()
@@ -853,6 +863,13 @@ beatle J R Ringo False""")
 <li><label for="abc_2"><input checked="checked" type="checkbox" name="letters" value="c" id="abc_2" /> C</label></li>
 </ul>""")
 
+        # Each input gets a separate ID when the ID is passed to the constructor
+        self.assertHTMLEqual(CheckboxSelectMultiple(attrs={'id': 'abc'}).render('letters', list('ac'), choices=zip(list('abc'), list('ABC'))), """<ul>
+<li><label for="abc_0"><input checked="checked" type="checkbox" name="letters" value="a" id="abc_0" /> A</label></li>
+<li><label for="abc_1"><input type="checkbox" name="letters" value="b" id="abc_1" /> B</label></li>
+<li><label for="abc_2"><input checked="checked" type="checkbox" name="letters" value="c" id="abc_2" /> C</label></li>
+</ul>""")
+
     def test_multi(self):
         class MyMultiWidget(MultiWidget):
             def decompress(self, value):
@@ -989,16 +1006,14 @@ class NullBooleanSelectLazyForm(Form):
     """Form to test for lazy evaluation. Refs #17190"""
     bool = BooleanField(widget=NullBooleanSelect())
 
+@override_settings(USE_L10N=True)
 class FormsI18NWidgetsTestCase(TestCase):
     def setUp(self):
         super(FormsI18NWidgetsTestCase, self).setUp()
-        self.old_use_l10n = getattr(settings, 'USE_L10N', False)
-        settings.USE_L10N = True
         activate('de-at')
 
     def tearDown(self):
         deactivate()
-        settings.USE_L10N = self.old_use_l10n
         super(FormsI18NWidgetsTestCase, self).tearDown()
 
     def test_splitdatetime(self):
@@ -1091,6 +1106,22 @@ class WidgetTests(TestCase):
         self.assertFalse(form.is_valid())
         form = SplitDateRequiredForm({'field': ['', '']})
         self.assertFalse(form.is_valid())
+
+
+class LiveWidgetTests(AdminSeleniumWebDriverTestCase):
+    urls = 'regressiontests.forms.urls'
+
+    def test_textarea_trailing_newlines(self):
+        """
+        Test that a roundtrip on a ModelForm doesn't alter the TextField value
+        """
+        article = Article.objects.create(content="\nTst\n")
+        self.selenium.get('%s%s' % (self.live_server_url,
+            reverse('article_form', args=[article.pk])))
+        self.selenium.find_element_by_id('submit').submit()
+        article = Article.objects.get(pk=article.pk)
+        # Should be "\nTst\n" after #19251 is fixed
+        self.assertEqual(article.content, "\r\nTst\r\n")
 
 
 @python_2_unicode_compatible

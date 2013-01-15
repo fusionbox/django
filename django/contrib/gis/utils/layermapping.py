@@ -16,8 +16,9 @@ from django.contrib.gis.gdal import (CoordTransform, DataSource,
 from django.contrib.gis.gdal.field import (
     OFTDate, OFTDateTime, OFTInteger, OFTReal, OFTString, OFTTime)
 from django.db import models, transaction
-from django.contrib.localflavor.us.models import USStateField
 from django.utils import six
+from django.utils.encoding import force_text
+
 
 # LayerMapping exceptions.
 class LayerMapError(Exception): pass
@@ -53,7 +54,6 @@ class LayerMapping(object):
         models.SlugField : OFTString,
         models.TextField : OFTString,
         models.URLField : OFTString,
-        USStateField : OFTString,
         models.BigIntegerField : (OFTInteger, OFTReal, OFTString),
         models.SmallIntegerField : (OFTInteger, OFTReal, OFTString),
         models.PositiveSmallIntegerField : (OFTInteger, OFTReal, OFTString),
@@ -65,7 +65,7 @@ class LayerMapping(object):
                          }
 
     def __init__(self, model, data, mapping, layer=0,
-                 source_srs=None, encoding=None,
+                 source_srs=None, encoding='utf-8',
                  transaction_mode='commit_on_success',
                  transform=True, unique=None, using=None):
         """
@@ -76,7 +76,7 @@ class LayerMapping(object):
         """
         # Getting the DataSource and the associated Layer.
         if isinstance(data, six.string_types):
-            self.ds = DataSource(data)
+            self.ds = DataSource(data, encoding=encoding)
         else:
             self.ds = data
         self.layer = self.ds[layer]
@@ -330,7 +330,7 @@ class LayerMapping(object):
             if self.encoding:
                 # The encoding for OGR data sources may be specified here
                 # (e.g., 'cp437' for Census Bureau boundary files).
-                val = six.text_type(ogr_field.value, self.encoding)
+                val = force_text(ogr_field.value, self.encoding)
             else:
                 val = ogr_field.value
                 if model_field.max_length and len(val) > model_field.max_length:
